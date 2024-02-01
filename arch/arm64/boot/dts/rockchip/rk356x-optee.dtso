@@ -1,0 +1,21 @@
+/dts-v1/;
+/plugin/;
+
+&{/} {
+	firmware {
+		optee {
+			compatible = "linaro,optee-tz";
+			method = "smc";
+		};
+	};
+
+	reserved_memory: reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+
+		secure_ddr: optee@8400000 {
+			reg = <0x0 0x08400000 0x0 0x02000000>;
+			no-map;
+		};
+	};
+};

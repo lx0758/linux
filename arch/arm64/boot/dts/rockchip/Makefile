@@ -324,3 +324,10 @@ rk3588-rock-5b-pcie-srns-dtbs := rk3588-rock-5b.dtb \
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588-tiger-haikou-haikou-video-demo.dtb
 rk3588-tiger-haikou-haikou-video-demo-dtbs := rk3588-tiger-haikou.dtb \
 	rk3588-tiger-haikou-video-demo.dtbo
+
+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk356x-hdsci.dtbo
+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk356x-optee.dtbo
+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3566-orangepi-3b-custom.dtb
+rk3566-orangepi-3b-custom-dtbs := rk3566-orangepi-3b-v1.1.dtb \
+	rk356x-hdsci.dtbo \
+	rk356x-optee.dtbo
