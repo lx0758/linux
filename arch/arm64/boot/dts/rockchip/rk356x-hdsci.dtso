@@ -1,0 +1,12 @@
+/dts-v1/;
+/plugin/;
+
+&{/} {
+
+};
+
+&sdhci {
+	cap-sd-highspeed;
+	max-frequency = <150000000>;
+	status = "okay";
+};
