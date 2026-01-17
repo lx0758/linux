@@ -7,6 +7,7 @@
  */
 
 #include <linux/property.h>
+#include <linux/version.h>
 
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
@@ -4338,7 +4339,11 @@ static int hci_setup_link_policy_sync(struct hci_dev *hdev)
 		link_policy |= HCI_LP_HOLD;
 	if (lmp_sniff_capable(hdev))
 		link_policy |= HCI_LP_SNIFF;
-	if (lmp_park_capable(hdev))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+	if (lmp_park_capable(hdev) && !hci_test_quirk(hdev, HCI_QUIRK_BROKEN_PARK_LINK_STATUS))
+#else
+	if (lmp_park_capable(hdev) && !test_bit(HCI_QUIRK_BROKEN_PARK_LINK_STATUS, &hdev->quirks))
+#endif
 		link_policy |= HCI_LP_PARK;
 
 	cp.policy = cpu_to_le16(link_policy);
