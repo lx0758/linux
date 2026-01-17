@@ -1,0 +1,19 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+
+&{/} {
+	uwe-bsp {
+		compatible = "unisoc,uwe_bsp";
+		wl-reg-on = <&gpio0 RK_PD3 GPIO_ACTIVE_HIGH>;
+		bt-reg-on = <&gpio2 RK_PB7 GPIO_ACTIVE_HIGH>;
+		wl-wake-host-gpio = <&gpio0 RK_PD6 GPIO_ACTIVE_HIGH>;
+		bt-wake-host-gpio = <&gpio2 RK_PC0 GPIO_ACTIVE_HIGH>;
+		sdio-ext-int-gpio = <&gpio2 RK_PC1 GPIO_ACTIVE_HIGH>;
+		data-irq;
+		blksz-512;
+		keep-power-on;
+	};
+};
