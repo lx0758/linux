@@ -937,6 +937,7 @@ static int sprdwl_set_mac(struct net_device *dev, void *addr)
 			dev_addr_set(dev, sa->sa_data);
 #else
 			memcpy(dev->dev_addr, sa->sa_data, ETH_ALEN);
+			memcpy(dev->dev_addr_shadow, sa->sa_data, ETH_ALEN);
 #endif
 		} else {
 			vif->has_rand_mac = false;
@@ -946,6 +947,7 @@ static int sprdwl_set_mac(struct net_device *dev, void *addr)
 			dev_addr_set(dev, vif->mac);
 #else
 			memcpy(dev->dev_addr, vif->mac, ETH_ALEN);
+			memcpy(dev->dev_addr_shadow, sa->sa_data, ETH_ALEN);
 #endif
 		}
 	}
