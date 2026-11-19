@@ -801,7 +801,7 @@ out:
 #define SPRDWLSETCOUNTRY	(SIOCDEVPRIVATE + 5)
 #define SPRDWLSETTLV		(SIOCDEVPRIVATE + 7)
 
-static int sprdwl_ioctl(struct net_device *ndev, struct ifreq *req, int cmd)
+static int __maybe_unused sprdwl_ioctl(struct net_device *ndev, struct ifreq *req, int cmd)
 {
 	struct sprdwl_vif *vif = netdev_priv(ndev);
 	struct iwreq *wrq = (struct iwreq *)req;
@@ -834,22 +834,49 @@ static int sprdwl_ioctl(struct net_device *ndev, struct ifreq *req, int cmd)
 	return 0;
 }
 
+/* The firmware filter only takes IPv4 (01:00:5e:00-7f) and IPv6 (33:33)
+ * multicast addresses. Others, e.g. the 01:80:c2 addresses systemd-networkd
+ * joins for LLDP, must be skipped instead of aborting the whole update.
+ */
+static bool sprdwl_is_ip_mc_addr(const u8 *addr)
+{
+	return (addr[0] == 0x33 && addr[1] == 0x33) ||
+	       (addr[0] == 0x01 && addr[1] == 0x00 &&
+		addr[2] == 0x5e && addr[3] <= 0x7f);
+}
+
+static unsigned int sprdwl_ip_mc_count(struct net_device *ndev)
+{
+	struct netdev_hw_addr *ha;
+	unsigned int count = 0;
+
+	netdev_for_each_mc_addr(ha, ndev)
+		if (sprdwl_is_ip_mc_addr(ha->addr))
+			count++;
+
+	return count;
+}
+
 static bool mc_address_changed(struct net_device *ndev)
 {
 	struct sprdwl_vif *vif = netdev_priv(ndev);
 	struct netdev_hw_addr *ha;
-	u8 mc_count, index;
+	unsigned int mc_count;
+	u8 index;
 	u8 *mac_addr;
 	bool found;
 
-	mc_count = netdev_mc_count(ndev);
+	mc_count = sprdwl_ip_mc_count(ndev);
 
 	if (mc_count != vif->mc_filter->mac_num)
 		return true;
 
-	mac_addr = vif->mc_filter->mac_addr;
 	netdev_for_each_mc_addr(ha, ndev) {
+		if (!sprdwl_is_ip_mc_addr(ha->addr))
+			continue;
+
 		found = false;
+		mac_addr = vif->mc_filter->mac_addr;
 		for (index = 0; index < vif->mc_filter->mac_num; index++) {
 			if (!memcmp(ha->addr, mac_addr, ETH_ALEN)) {
 				found = true;
@@ -871,11 +898,11 @@ static void sprdwl_set_multicast(struct net_device *ndev)
 	struct sprdwl_priv *priv = vif->priv;
 	struct sprdwl_work *work;
 	struct netdev_hw_addr *ha;
-	u8 mc_count;
+	unsigned int mc_count;
 	u8 *mac_addr;
 
-	mc_count = netdev_mc_count(ndev);
-	wl_ndev_log(L_DBG, ndev, "%s multicast address num: %d\n", __func__, mc_count);
+	mc_count = sprdwl_ip_mc_count(ndev);
+	wl_ndev_log(L_DBG, ndev, "%s multicast address num: %u\n", __func__, mc_count);
 	if (mc_count > priv->max_mc_mac_addrs)
 		return;
 
@@ -883,15 +910,13 @@ static void sprdwl_set_multicast(struct net_device *ndev)
 	if ((ndev->flags & IFF_MULTICAST) && (mc_address_changed(ndev))) {
 		mac_addr = vif->mc_filter->mac_addr;
 		netdev_for_each_mc_addr(ha, ndev) {
+			if (!sprdwl_is_ip_mc_addr(ha->addr)) {
+				wl_ndev_log(L_DBG, ndev, "%s skip non-IP addr: %pM\n",
+					    __func__, ha->addr);
+				continue;
+			}
 			wl_ndev_log(L_DBG, ndev, "%s set mac: %pM\n", __func__,
 				    ha->addr);
-			if ((ha->addr[0] != 0x33 || ha->addr[1] != 0x33) &&
-			    (ha->addr[0] != 0x01 || ha->addr[1] != 0x00 ||
-			     ha->addr[2] != 0x5e || ha->addr[3] > 0x7f)) {
-				wl_ndev_log(L_INFO, ndev, "%s invalid addr\n",
-					    __func__);
-				return;
-			}
 			ether_addr_copy(mac_addr, ha->addr);
 			mac_addr += ETH_ALEN;
 		}
@@ -963,7 +988,9 @@ static struct net_device_ops sprdwl_netdev_ops = {
 	.ndo_start_xmit = sprdwl_start_xmit,
 	.ndo_get_stats = sprdwl_get_stats,
 	.ndo_tx_timeout = sprdwl_tx_timeout,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 4, 0)
 	.ndo_do_ioctl = sprdwl_ioctl,
+#endif
 	.ndo_set_mac_address = sprdwl_set_mac,
 };
 
@@ -1303,21 +1330,21 @@ static void sprdwl_deinit_vif(struct sprdwl_vif *vif)
 {
 	sprdwl_scan_done(vif, true);
 	sprdwl_sched_scan_done(vif, true);
+	/*
+	 * Report the connection as gone before the interface is removed.
+	 * The firmware's disconnect event will not arrive any more, and
+	 * cfg80211 warns about a station interface that still has a BSS
+	 * (_cfg80211_unregister_wdev).
+	 */
+	if (vif->ndev &&
+	    (vif->sm_state == SPRDWL_CONNECTING ||
+	     vif->sm_state == SPRDWL_CONNECTED ||
+	     vif->sm_state == SPRDWL_DISCONNECTING))
+		sprdwl_report_disconnection(vif, WLAN_REASON_DEAUTH_LEAVING);
+
 	/* We have to clear all the work which
 	 * is belong to the vif we are going to remove.
 	 */
-#ifdef SYNC_DISCONNECT
-	if (vif->sm_state == SPRDWL_CONNECTING ||
-	    vif->sm_state == SPRDWL_CONNECTED  ||
-	    vif->sm_state == SPRDWL_DISCONNECTING)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)
-		cfg80211_disconnected(vif->ndev, 3,
-		NULL, 0, false, GFP_KERNEL);
-#else
-		cfg80211_disconnected(vif->ndev, 3,
-		NULL, 0, GFP_KERNEL);
-#endif
-#endif
 	sprdwl_cancle_work(vif->priv, vif);
 
 	if (vif->ref > 0) {
@@ -1657,23 +1684,12 @@ int sprdwl_core_deinit(struct sprdwl_priv *priv)
 }
 
 unsigned int wfa_cap;
-module_param(wfa_cap, uint, 0000);
+module_param(wfa_cap, uint, 0444);
 MODULE_PARM_DESC(wfa_cap, "set capability for WFA test");
 
 unsigned int disable_powersave;
-module_param(disable_powersave, uint, 0000);
-MODULE_PARM_DESC(disable_powersave, "Disable firmware power save mode (0=default, 1=ignore EVENT_PWR_DOWN)");
+module_param(disable_powersave, uint, 0644);
+MODULE_PARM_DESC(disable_powersave, "Disable firmware power save mode (0=default, 1=ignore EVENT_PWR_DOWN); takes effect at the next power-down request");
 
-unsigned int tcp_ack_drop_cnt = SPRDWL_TCP_ACK_DROP_CNT;
-/* Maybe you need S_IRUGO | S_IWUSR for debug */
-module_param(tcp_ack_drop_cnt, uint, 0000);
-MODULE_PARM_DESC(tcp_ack_drop_cnt, "valid values: [1, 13]");
-
-#ifdef TCP_ACK_DROP_SUPPORT
-unsigned int tcp_ack_drop_enable = 1;
-module_param(tcp_ack_drop_enable, uint, 0000);
-MODULE_PARM_DESC(tcp_ack_drop_enable, "valid values: [0, 1]");
-#else
-const unsigned int tcp_ack_drop_enable;
-#endif
+/* tcp_ack_drop_cnt and tcp_ack_drop_enable are defined in tcp_ack.c */
 
